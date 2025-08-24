@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import sqlite3, json
@@ -36,10 +36,9 @@ def products():
         d["thumbnail"] = imgs[0] if imgs and imgs[0] else ""
     return JSONResponse(data)
 
-@app.get("/product/{pid}")
-def product(pid: int):
+def _read_product(pid: int):
     if not Path(DB_PATH).exists():
-        return JSONResponse({}, status_code=404)
+        return None
     conn = sqlite3.connect(DB_PATH)
     p = conn.execute("""
         SELECT p.id, p.title, p.url, p.currency, p.price, p.stock_status, p.category_path,
@@ -51,7 +50,7 @@ def product(pid: int):
         WHERE p.id = ?
     """, (pid,)).fetchone()
     if not p:
-        return JSONResponse({}, status_code=404)
+        return None
     cols = ["id","title","url","currency","price","stock_status","category_path","brand","description_html","options_json"]
     item = dict(zip(cols, p))
     rows = conn.execute("SELECT url FROM media WHERE product_id=? ORDER BY position ASC", (pid,)).fetchall()
@@ -60,6 +59,22 @@ def product(pid: int):
         item["options"] = json.loads(item.pop("options_json") or "{}")
     except Exception:
         item["options"] = {"sizes": []}
+    return item
+
+# Варіант 1: /product/123
+@app.get("/product/{pid}")
+def product_path(pid: int):
+    item = _read_product(pid)
+    if not item:
+        return JSONResponse({}, status_code=404)
+    return JSONResponse(item)
+
+# Варіант 2: /product?id=123  (для фронту, який так звертається)
+@app.get("/product")
+def product_query(id: int = Query(...)):
+    item = _read_product(id)
+    if not item:
+        return JSONResponse({}, status_code=404)
     return JSONResponse(item)
 
 @app.get("/")
