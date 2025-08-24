@@ -1,0 +1,26 @@
+{
+  "source": "example-shop.ua",
+  "listing": {
+    "start_urls": [
+      "https://example-shop.ua/category/ryba"
+    ],
+    "product_link_selector": "a.product-card__link",
+    "pagination_next_selector": "a.pagination__next"
+  },
+  "product_page": {
+    "title_selector": "h1.product-title",
+    "brand_selector": "span.product-brand",
+    "description_selector": "div.product-description",
+    "price_selector": "span.price__current",
+    "currency": "UAH",
+    "sku_selector": "span.product-sku",
+    "gtin_selector": "span.product-gtin",
+    "image_selector": "div.product-gallery img",
+    "stock_selector": "span.stock-status",
+    "category_breadcrumb_selector": "nav.breadcrumbs a"
+  },
+  "routing": {
+    "force_brand_for_domain": null,
+    "confidence_threshold": 0.8
+  }
+}

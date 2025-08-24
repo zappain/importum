@@ -1,0 +1,75 @@
+
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>UM MVP — Продукти</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; background:#0b0b0b; color:#fff; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+    .card { background:#141414; border-radius:16px; padding:12px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .card img { width: 100%; height: 180px; object-fit: cover; border-radius: 12px; background:#222; }
+    .title { font-size: 14px; margin: 8px 0 4px; line-height:1.3 }
+    .brand { font-size: 12px; opacity: .7; }
+    .price { font-weight: 600; margin-top:6px; }
+    .row { display:flex; justify-content: space-between; align-items:center; gap:8px; }
+    .link { font-size: 12px; color: #7dd3fc; text-decoration: none; }
+    .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background:#1f2937; }
+    .toolbar { margin-bottom:12px; display:flex; gap:8px; align-items:center; }
+    input { background:#141414; color:#fff; border:1px solid #333; border-radius:10px; padding:8px 10px; }
+    select { background:#141414; color:#fff; border:1px solid #333; border-radius:10px; padding:8px 10px; }
+  </style>
+</head>
+<body>
+  <h1>UM MVP — Імпортовані товари</h1>
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="Пошук по назві/бренду…" oninput="render()">
+    <select id="brand" onchange="render()"><option value="">Всі бренди</option></select>
+  </div>
+  <div id="grid" class="grid"></div>
+
+<script>
+let DATA = [];
+async function load() {
+  const r = await fetch('/products');
+  DATA = await r.json();
+  const brands = [...new Set(DATA.map(x => x.brand).filter(Boolean))].sort();
+  const sel = document.getElementById('brand');
+  brands.forEach(b => {
+    const o = document.createElement('option'); o.value = b; o.textContent = b; sel.appendChild(o);
+  });
+  render();
+}
+function firstImage(imgs) {
+  if (!imgs) return '';
+  const arr = imgs.split('|').filter(Boolean);
+  return arr.length ? arr[0] : '';
+}
+function render() {
+  const q = (document.getElementById('q').value || '').toLowerCase();
+  const b = document.getElementById('brand').value || '';
+  const grid = document.getElementById('grid');
+  const items = DATA.filter(x => {
+    const okBrand = !b || (x.brand||'') === b;
+    const okQ = !q || ((x.title||'').toLowerCase().includes(q) || (x.brand||'').toLowerCase().includes(q));
+    return okBrand && okQ;
+  });
+  grid.innerHTML = items.map(x => `
+    <div class="card">
+      <img src="${firstImage(x.images)}" alt="">
+      <div class="brand">${x.brand||''}</div>
+      <div class="title">${x.title||''}</div>
+      <div class="row">
+        <div class="price">${x.price ? (x.price + ' ' + (x.currency||'')) : ''}</div>
+        <span class="pill">${x.stock_status||''}</span>
+      </div>
+      <a class="link" href="${x.url}" target="_blank">Відкрити на джерелі →</a>
+    </div>
+  `).join('');
+}
+load();
+</script>
+</body>
+</html>
