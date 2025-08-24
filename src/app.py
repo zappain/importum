@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import sqlite3, json
+import sqlite3
 from pathlib import Path
 
 app = FastAPI()
@@ -9,75 +9,74 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 DB_PATH = "um.db"
 
+
 def rows_to_dicts(rows, cols):
     return [dict(zip(cols, r)) for r in rows]
+
 
 @app.get("/products")
 def products():
     if not Path(DB_PATH).exists():
         return JSONResponse([])
     conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute(
-        """
-        SELECT p.id, p.title, p.url, p.currency, p.price, p.stock_status, p.category_path,
-               IFNULL(b.name,'') as brand,
-               IFNULL(GROUP_CONCAT(m.url, '|'),'') as images
-        FROM products p
-        LEFT JOIN brands b ON p.brand_id = b.id
-        LEFT JOIN media m ON m.product_id = p.id
-        GROUP BY p.id
-        ORDER BY p.id DESC
-        """
+    c = conn.cursor()
+    c.execute(
+        "SELECT p.id, p.title, p.price, p.currency, "
+        "(SELECT url FROM media WHERE product_id=p.id LIMIT 1) as photo, "
+        "b.name as brand "
+        "FROM products p LEFT JOIN brands b ON p.brand_id=b.id "
+        "ORDER BY p.id DESC"
     )
-    cols = ["id","title","url","currency","price","stock_status","category_path","brand","images"]
-    data = rows_to_dicts(cur.fetchall(), cols)
-    for d in data:
-        imgs = (d.get("images") or "").split("|")
-        d["thumbnail"] = imgs[0] if imgs and imgs[0] else ""
-    return JSONResponse(data)
+    rows = c.fetchall()
+    cols = [d[0] for d in c.description]
+    conn.close()
+    return rows_to_dicts(rows, cols)
 
-def _read_product(pid: int):
-    if not Path(DB_PATH).exists():
-        return None
-    conn = sqlite3.connect(DB_PATH)
-    p = conn.execute("""
-        SELECT p.id, p.title, p.url, p.currency, p.price, p.stock_status, p.category_path,
-               IFNULL(b.name,'') as brand,
-               IFNULL(p.description_html,'') as description_html,
-               IFNULL(p.options_json,'') as options_json
-        FROM products p
-        LEFT JOIN brands b ON p.brand_id = b.id
-        WHERE p.id = ?
-    """, (pid,)).fetchone()
-    if not p:
-        return None
-    cols = ["id","title","url","currency","price","stock_status","category_path","brand","description_html","options_json"]
-    item = dict(zip(cols, p))
-    rows = conn.execute("SELECT url FROM media WHERE product_id=? ORDER BY position ASC", (pid,)).fetchall()
-    item["images"] = [r[0] for r in rows]
-    try:
-        item["options"] = json.loads(item.pop("options_json") or "{}")
-    except Exception:
-        item["options"] = {"sizes": []}
-    return item
 
-# Варіант 1: /product/123
-@app.get("/product/{pid}")
-def product_path(pid: int):
-    item = _read_product(pid)
-    if not item:
-        return JSONResponse({}, status_code=404)
-    return JSONResponse(item)
-
-# Варіант 2: /product?id=123  (для фронту, який так звертається)
+@app.get("/product/{product_id}")
 @app.get("/product")
-def product_query(id: int = Query(...)):
-    item = _read_product(id)
-    if not item:
-        return JSONResponse({}, status_code=404)
-    return JSONResponse(item)
+def product_detail(request: Request, product_id: int = Query(None)):
+    """Підтримка і /product/11 і /product?id=11"""
+    if product_id is None:
+        product_id = request.query_params.get("id")
+    if not product_id:
+        return HTMLResponse("<h3>Не знайдено</h3>", status_code=404)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, title, description_html, price, currency "
+        "FROM products WHERE id=?",
+        (product_id,),
+    )
+    row = c.fetchone()
+
+    # фото
+    c.execute("SELECT url FROM media WHERE product_id=?", (product_id,))
+    photos = [r[0] for r in c.fetchall()]
+
+    # розміри
+    c.execute("SELECT value FROM options WHERE product_id=?", (product_id,))
+    options = [r[0] for r in c.fetchall()]
+    conn.close()
+
+    if not row:
+        return HTMLResponse("<h3>Не знайдено</h3>", status_code=404)
+
+    product = {
+        "id": row[0],
+        "title": row[1],
+        "description": row[2],
+        "price": row[3],
+        "currency": row[4],
+        "photos": photos,
+        "options": options,
+    }
+    return JSONResponse(product)
+
 
 @app.get("/")
 def index():
     with open("web/static/index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
