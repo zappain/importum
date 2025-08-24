@@ -1,20 +1,19 @@
-
 import requests
-from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from typing import Dict, Any, List, Optional
 from .normalize import normalize_text, parse_price
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; UM-Importer/0.1; +https://ukrainemart.example)"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; UM-Importer/0.2; +https://ukrainemart.example)"}
 
-def fetch_html(url: str) -> str:
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+def fetch_json(url: str) -> dict:
+    api_url = url if url.endswith(".json") else url.rstrip("/") + ".json"
+    resp = requests.get(api_url, headers=HEADERS, timeout=25)
     resp.raise_for_status()
-    return resp.text
+    return resp.json()
 
 def crawl_listing(start_url: str, product_link_sel: str, pagination_next_sel: Optional[str]) -> List[str]:
+    # Тепер crawl_listing лишаємо як є, бо лістинг ми парсимо з HTML
+    from bs4 import BeautifulSoup
     urls, to_visit = [], [start_url]
     seen = set()
     while to_visit:
@@ -22,7 +21,7 @@ def crawl_listing(start_url: str, product_link_sel: str, pagination_next_sel: Op
         if url in seen:
             continue
         seen.add(url)
-        html = fetch_html(url)
+        html = requests.get(url, headers=HEADERS, timeout=25).text
         soup = BeautifulSoup(html, "lxml")
         for a in soup.select(product_link_sel):
             href = a.get("href")
@@ -35,48 +34,41 @@ def crawl_listing(start_url: str, product_link_sel: str, pagination_next_sel: Op
     return list(dict.fromkeys(urls))
 
 def parse_product(url: str, conf: Dict[str, Any]) -> Dict[str, Any]:
-    html = fetch_html(url)
-    soup = BeautifulSoup(html, "lxml")
-    def get_text(sel: Optional[str]):
-        el = soup.select_one(sel) if sel else None
-        return normalize_text(el.get_text(strip=True)) if el else None
-    def get_html(sel: Optional[str]):
-        el = soup.select_one(sel) if sel else None
-        return str(el) if el else None
+    data = fetch_json(url)
+    product = data.get("product", {})
 
-    title = get_text(conf.get("title_selector"))
-    brand_raw = get_text(conf.get("brand_selector"))
-    description_html = get_html(conf.get("description_selector"))
-    price_raw = get_text(conf.get("price_selector"))
-    price = parse_price(price_raw)
-    sku = get_text(conf.get("sku_selector"))
-    gtin = get_text(conf.get("gtin_selector"))
+    title = normalize_text(product.get("title"))
+    description_html = product.get("body_html")
     currency = conf.get("currency") or "UAH"
-    stock = get_text(conf.get("stock_selector"))
-    images = []
-    img_sel = conf.get("image_selector")
-    if img_sel:
-        for img in soup.select(img_sel):
-            src = img.get("src") or img.get("data-src")
-            if src:
-                images.append(urljoin(url, src))
-    cat = None
-    bc_sel = conf.get("category_breadcrumb_selector")
-    if bc_sel:
-        cats = [el.get_text(strip=True) for el in soup.select(bc_sel)]
-        if cats:
-            cat = " > ".join(cats)
+
+    # ---- ВАРІАНТИ (ціни, sku, розміри)
+    variants = product.get("variants", [])
+    price = None
+    sku = None
+    sizes = []
+    if variants:
+        price = parse_price(str(variants[0].get("price")))
+        sku = variants[0].get("sku")
+        for v in variants:
+            opt = v.get("option1")
+            if opt and opt.lower() not in ("default title",):
+                sizes.append(opt)
+
+    # ---- ФОТО
+    images = [img.get("src") for img in product.get("images", []) if img.get("src")]
+
     return {
         "url": url,
         "title": title,
-        "brand_raw": brand_raw,
+        "brand_raw": None,
         "description_html": description_html,
         "currency": currency,
         "price": price,
-        "price_raw": price_raw,
+        "price_raw": str(price) if price else None,
         "sku": sku,
-        "gtin": gtin,
+        "gtin": None,
         "images": images,
-        "stock_status": stock,
-        "category_path": cat
+        "sizes": sizes,
+        "stock_status": None,
+        "category_path": None
     }
